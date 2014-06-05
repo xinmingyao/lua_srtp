@@ -1,7 +1,8 @@
 #ifndef lua_srtcp_h
 #define lua_srtcp_h
 #include "srtp.h"
-
+#include "rtp.h"
+#include "rtp_priv.h"
 
 #if defined(_WIN32)
 #include <windows.h>

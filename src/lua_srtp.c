@@ -1,6 +1,7 @@
 #include "lua_srtp.h"
 #include "lua.h"
 #include "lauxlib.h"
+#include "assert.h"
 
 #include <string.h>
 #define false -1
@@ -54,7 +55,7 @@ static int
 lprotect_rtp(lua_State *L){
   struct  lua_srtp  * srtp = lua_touserdata(L,1);
   void * buffer = lua_touserdata(L,2);
-  int len = lua_checkinteger(L,3);
+  int len = luaL_checkinteger(L,3);
   int res = srtp_protect(srtp->send_session,buffer,&len);
   if(res == 0){
     lua_pushboolean(L,true);
@@ -75,7 +76,7 @@ static int
 lunprotect_rtp(lua_State *L){
   struct lua_srtp  * srtp = lua_touserdata(L,1);
   void * buffer = lua_touserdata(L,2);
-  int len = lua_checkinteger(L,3);
+  int len = luaL_checkinteger(L,3);
   int res = srtp_unprotect(srtp->send_session,buffer,&len);
   if(res == 0){
     lua_pushboolean(L,true);
@@ -92,6 +93,55 @@ lunprotect_rtcp(lua_State *L){
   return luaL_error(L, "rtcp not support!");
 }
 
+static int lunpack_rtp(lua_State *L){
+  rtp_msg_t * message = lua_touserdata(L,1);
+  int len = luaL_checkinteger(L,2) - 12;
+  char * msg = malloc(len);
+  memcpy(msg,message->body,len);
+  lua_pushlightuserdata(L,msg);
+  lua_pushinteger(L,len);
+  lua_pushinteger(L,ntohs(message->header.ssrc));
+  lua_pushinteger(L,ntohs(message->header.ts));
+  lua_pushinteger(L,ntohs(message->header.seq));    
+  free(message);
+  return 5;//msg,sz,ssrc,ts,seq
+}
+static int lpack_rtp(lua_State *L){//msg,sz,ssrc,ts,seq|str,ssrc,ts,seq
+  size_t len = 0;
+  int type = lua_type(L,1);
+  int next = 2;
+  char * data;
+  if (type == LUA_TSTRING){
+    data = luaL_checklstring(L, 1, &len);
+  }else{
+    data = lua_touserdata(L,1);
+    len = luaL_checkinteger(L,2);
+    next ++;
+  }
+  int ssrc = luaL_checkinteger(L,next);
+  next++;
+  uint16_t seq = luaL_checkinteger(L,next);
+  next++;
+  uint32_t ts = luaL_checkinteger(L,next);
+  rtp_msg_t * message = malloc(sizeof(*message));
+  message->header.ssrc    = htonl(ssrc);
+  message->header.ts      = htonl(ts);
+  message->header.seq     = htonl(seq);
+  message->header.m       = 0;
+  message->header.pt      = 0x1;
+  message->header.version = 2;
+  message->header.p       = 0;
+  message->header.x       = 0;
+  message->header.cc      = 0;
+  assert(len<RTP_MAX_BUF_LEN);
+  memcpy(message->body,data,len);
+  if (type != LUA_TSTRING){
+    free(data);
+  }
+  lua_pushlightuserdata(L, message);
+  lua_pushinteger(L, (int)len);  
+  return 2;
+}
 
 
 
@@ -108,6 +158,8 @@ lua_open_lua_srtp(lua_State *L) {
     { "unprotect_rtp",lunprotect_rtp},
     { "protect_rtcp", lprotect_rtcp},
     { "unprotect_rtcp",lunprotect_rtcp},
+    { "pack_rtp",lpack_rtp},
+    { "unpack_rtp",lunpack_rtp},
     { NULL, NULL },
   };
   luaL_newlib(L,l);

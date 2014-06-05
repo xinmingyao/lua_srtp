@@ -1,5 +1,5 @@
 LUALIB_MINGW=-I/usr/local/include -L/usr/local/bin -llua52  -llibsrtp
-SRTP = -I./srtp/include -I./srtp/crypto/include -L./srtp/ -static -llibsrtp
+SRTP = -I./srtp/include -I./srtp/crypto/include -L./srtp/  -lsrtp
 SRC=\
 src/lua_srtp.c
 

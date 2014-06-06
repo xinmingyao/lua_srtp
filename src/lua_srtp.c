@@ -147,7 +147,7 @@ static int lpack_rtp(lua_State *L){//msg,sz,ssrc,ts,seq|str,ssrc,ts,seq
 
 SRTP_API
 int
-lua_open_lua_srtp(lua_State *L) {
+luaopen_lua_srtp(lua_State *L) {
   luaL_checkversion(L);
   luaL_Reg l[] = {
     { "new", lnew },

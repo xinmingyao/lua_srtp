@@ -94,7 +94,7 @@ lunprotect_rtp(lua_State *L){
   struct lua_srtp  * srtp = lua_touserdata(L,1);
   void * buffer = lua_touserdata(L,2);
   int len = luaL_checkinteger(L,3);
-  int res = srtp_unprotect(srtp->send_session,buffer,&len);
+  int res = srtp_unprotect(srtp->receive_session,buffer,&len);
   if(res == 0){
     lua_pushboolean(L,true);
     lua_pushinteger(L,len);
@@ -144,9 +144,9 @@ static int lpack_rtp(lua_State *L){//msg,sz,ssrc,ts,seq|str,ssrc,ts,seq
   next++;
   uint32_t ts = luaL_checkinteger(L,next);
   rtp_msg_t * message = malloc(sizeof(*message));
-  message->header.ssrc    = htonl(ssrc);
-  message->header.ts      = htonl(ts);
-  message->header.seq     = htonl(seq);
+  message->header.ssrc    = ssrc;
+  message->header.ts      = ts;
+  message->header.seq     = seq;
   message->header.m       = 0;
   message->header.pt      = 0x100;
   message->header.version = 2;

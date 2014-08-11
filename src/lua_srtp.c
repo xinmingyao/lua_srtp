@@ -6,10 +6,11 @@
 #include <string.h>
 #define false 0
 #define true 1
-#define RTCP_Sender_PT 200 //rtcp sender report
-#define RTCP_Receiver_PT 201
-#define RTCP_RTP_Feedback_PT 205
-#define RTCP_PS_Feedback_PT 206
+//#define RTCP_Sender_PT 200 //rtcp sender report
+//#define RTCP_Receiver_PT 201
+//#define RTCP_RTP_Feedback_PT 205
+//#define RTCP_PS_Feedback_PT 206
+#include "rtputils.h"
 static int
 configure_srtp_session(srtp_t *session, uint8_t * key,enum transmission_type type);
 
@@ -123,11 +124,11 @@ lprotect_data(lua_State *L){
   void * buffer = lua_touserdata(L,2);
   int len = luaL_checkinteger(L,3);
   int res;
-  rtp_msg_t * rtp = (rtp_msg_t *)buffer;
-  if(rtp->header.pt == RTCP_Sender_PT ||
-     rtp->header.pt == RTCP_Receiver_PT ||
-     rtp->header.pt == RTCP_PS_Feedback_PT ||
-     rtp->header.pt == RTCP_RTP_Feedback_PT){
+  srtcp_hdr_t * rtcp = (srtcp_hdr_t *)buffer;
+  if(rtcp->pt == RTCP_Sender_PT ||
+     rtcp->pt == RTCP_Receiver_PT ||
+     rtcp->pt == RTCP_PS_Feedback_PT ||
+     rtcp->pt == RTCP_RTP_Feedback_PT){
     res = srtp_protect_rtcp(srtp->receive_session,buffer,&len);
   }else{
     res = srtp_protect(srtp->receive_session,buffer,&len);
@@ -144,17 +145,45 @@ lprotect_data(lua_State *L){
   
 }
 
+static int
+lis_rtcp_feedback(lua_State *L){
+  srtcp_hdr_t * rtcp  = lua_touserdata(L,1);
+  if(rtcp->pt == RTCP_Receiver_PT ||
+     rtcp->pt == RTCP_PS_Feedback_PT ||
+     rtcp->pt == RTCP_RTP_Feedback_PT){
+    lua_pushboolean(L,true); 
+  }else{
+    lua_pushboolean(L,false);
+  }
+  return 1;
+}
+
+
+static int
+lis_rtcp(lua_State *L){
+  srtcp_hdr_t * rtcp  = lua_touserdata(L,1);
+  if(rtcp->pt == RTCP_Sender_PT ||
+     rtcp->pt == RTCP_Receiver_PT ||
+     rtcp->pt == RTCP_PS_Feedback_PT ||
+     rtcp->pt == RTCP_RTP_Feedback_PT){
+    lua_pushboolean(L,true); 
+  }else{
+    lua_pushboolean(L,false);
+  }
+  return 1;
+}
+
 static int 
 lunprotect_data(lua_State *L){
   struct lua_srtp * srtp  = lua_touserdata(L,1);
   void * buffer = lua_touserdata(L,2);
   int len = luaL_checkinteger(L,3);
   int res;
-  rtp_msg_t * rtp  = (rtp_msg_t *) buffer;  
-  if(rtp->header.pt == RTCP_Sender_PT ||
-     rtp->header.pt == RTCP_Receiver_PT ||
-     rtp->header.pt == RTCP_PS_Feedback_PT ||
-     rtp->header.pt == RTCP_RTP_Feedback_PT){
+  srtcp_hdr_t * rtcp  = (srtcp_hdr_t *) buffer;  
+  if(rtcp->pt == RTCP_Sender_PT ||
+     rtcp->pt == RTCP_Receiver_PT ||
+     rtcp->pt == RTCP_PS_Feedback_PT ||
+     rtcp->pt == RTCP_RTP_Feedback_PT){
     res = srtp_unprotect_rtcp(srtp->receive_session,buffer,&len);
   }else{
     res = srtp_unprotect(srtp->receive_session,buffer,&len);
@@ -243,8 +272,44 @@ static int lpack_rtp(lua_State *L){//msg,sz,ssrc,ts,seq|str,ssrc,ts,seq
   lua_pushinteger(L, (int)(sizeof(srtp_hdr_t)+len));  
   return 2;
 }
+//code from licode
+static int lfirst_packet(lua_State *L){
+  int sink_ssrc = luaL_checkinteger(L,1);
+  int source_ssrc = luaL_checkinteger(L,2);
+  int fir = luaL_checkinteger(L,3);
+  int pos = 0;
+  uint8_t * rtcpPacket = (uint8_t *)malloc(50);
+  // add full intra request indicator
+  uint8_t FMT = 4;
+  rtcpPacket[pos++] = (uint8_t) 0x80 + FMT;
+  rtcpPacket[pos++] = (uint8_t) 206;
 
+  //Length of 4
+  rtcpPacket[pos++] = (uint8_t) 0;
+  rtcpPacket[pos++] = (uint8_t) (4);
 
+  // Add our own SSRC
+  uint32_t* ptr = (uint32_t*)(rtcpPacket + pos);
+  ptr[0] = htonl(sink_ssrc);
+  pos += 4;
+
+  rtcpPacket[pos++] = (uint8_t) 0;
+  rtcpPacket[pos++] = (uint8_t) 0;
+  rtcpPacket[pos++] = (uint8_t) 0;
+  rtcpPacket[pos++] = (uint8_t) 0;
+  // Additional Feedback Control Information (FCI)
+  uint32_t* ptr2 = (uint32_t*)(rtcpPacket + pos);
+  ptr2[0] = htonl(source_ssrc);
+  pos += 4;
+
+  rtcpPacket[pos++] = (uint8_t) (fir);
+  rtcpPacket[pos++] = (uint8_t) 0;
+  rtcpPacket[pos++] = (uint8_t) 0;
+  rtcpPacket[pos++] = (uint8_t) 0;
+  lua_pushlightuserdata(L,rtcpPacket);
+  lua_pushinteger(L,pos);
+  return 2;
+}
 
 SRTP_API
 int
@@ -266,6 +331,9 @@ luaopen_lua_srtp(lua_State *L) {
     { "unprotect_data",lunprotect_data},
     { "update_ssrc",lupdate_ssrc},
     { "rtp_info",lrtp_info},
+    { "first_packet",lfirst_packet},
+    { "is_rtcp",lis_rtcp},
+    { "is_rtcp_feedback",lis_rtcp_feedback},
     { NULL, NULL },
   };
   luaL_newlib(L,l);

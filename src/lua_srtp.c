@@ -129,9 +129,9 @@ lprotect_data(lua_State *L){
      rtcp->pt == RTCP_Receiver_PT ||
      rtcp->pt == RTCP_PS_Feedback_PT ||
      rtcp->pt == RTCP_RTP_Feedback_PT){
-    res = srtp_protect_rtcp(srtp->receive_session,buffer,&len);
+    res = srtp_protect_rtcp(srtp->send_session,buffer,&len);
   }else{
-    res = srtp_protect(srtp->receive_session,buffer,&len);
+    res = srtp_protect(srtp->send_session,buffer,&len);
   }
   if(res == 0){
     lua_pushboolean(L,true);

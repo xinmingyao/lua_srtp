@@ -203,6 +203,7 @@ lunprotect_data(lua_State *L){
 static int
 lupdate_ssrc(lua_State *L){
   rtp_msg_t * message = lua_touserdata(L,1);
+  char * buf = lua_touserdata(L,1);
   srtcp_hdr_t * rtcp  = lua_touserdata(L,1);
   int len = luaL_checkinteger(L,2);
   int ssrc = htonl(luaL_checkinteger(L,3));
@@ -232,6 +233,37 @@ lupdate_ssrc(lua_State *L){
     return 1;
   }else{
     message->header.ssrc = ssrc;
+    rtpheader * head = (rtpheader *) message; 
+    if(message->header.pt == RED_90000_PT){
+      int totalLength = 12;
+
+      if (head->extension) {
+	totalLength += ntohs(head->extension)*4 + 4; // RTP Extension header
+      }
+      int rtpHeaderLength = totalLength;
+      struct redheader *redhead = (struct redheader*) (buf + totalLength);
+
+      //redhead->payloadtype = remoteSdp_.inOutPTMap[redhead->payloadtype];
+      //if (!remoteSdp_.supportPayloadType(head->payloadtype)) { //todo fixme
+      if(1){
+	while (redhead->follow) {
+	  totalLength += (ntohl(redhead->tsLength) & 0x3ff) + 4; // RED header
+	  redhead = (struct redheader*) (buf + totalLength);
+	}
+	// Parse RED packet to VP8 packet.
+	// Copy RTP header
+	char * deliverMediaBuffer_ = malloc(3000);
+	memcpy(deliverMediaBuffer_, buf, rtpHeaderLength);
+	// Copy payload data
+	memcpy(deliverMediaBuffer_ + totalLength, buf + totalLength + 1, len - totalLength - 1);
+	// Copy payload type
+	rtpheader *mediahead = (rtpheader*) deliverMediaBuffer_;
+	mediahead->payloadtype = redhead->payloadtype;
+	free(buf);
+	buf = deliverMediaBuffer_;
+	len = len - 1 - totalLength + rtpHeaderLength;
+      }
+    }
     return 0;
   }
 }

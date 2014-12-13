@@ -236,7 +236,6 @@ lupdate_ssrc(lua_State *L){
     rtpheader * head = (rtpheader *) message; 
     if(message->header.pt == RED_90000_PT){
       int totalLength = 12;
-
       if (head->extension) {
 	totalLength += ntohs(head->extension)*4 + 4; // RTP Extension header
       }
@@ -259,7 +258,7 @@ lupdate_ssrc(lua_State *L){
 	// Copy payload type
 	rtpheader *mediahead = (rtpheader*) deliverMediaBuffer_;
 	mediahead->payloadtype = redhead->payloadtype;
-	free(buf);
+	//free(buf);
 	buf = deliverMediaBuffer_;
 	len = len - 1 - totalLength + rtpHeaderLength;
       }
@@ -296,10 +295,10 @@ lrtp_info(lua_State *L){
     lua_pushinteger(L,message->header.pt);
     lua_settable(L,-3);
     lua_pushstring(L,"ts");
-    lua_pushinteger(L,ntohl(message->header.pt));
+    lua_pushinteger(L,ntohl(message->header.ts));
     lua_settable(L,-3);
     lua_pushstring(L,"seq");
-    lua_pushinteger(L,ntohl(message->header.pt));
+    lua_pushinteger(L,ntohs(message->header.ts));
     lua_settable(L,-3);
   }
   return 1;
@@ -311,8 +310,8 @@ static int lunpack_rtp(lua_State *L){
   memcpy(msg,message->body,len);
   lua_pushlightuserdata(L,msg);
   lua_pushinteger(L,len);
-  lua_pushinteger(L,ntohs(message->header.ssrc));
-  lua_pushinteger(L,ntohs(message->header.ts));
+  lua_pushinteger(L,ntohl(message->header.ssrc));
+  lua_pushinteger(L,ntohl(message->header.ts));
   lua_pushinteger(L,ntohs(message->header.seq));    
   free(message);
   return 5;//msg,sz,ssrc,ts,seq
@@ -335,9 +334,9 @@ static int lpack_rtp(lua_State *L){//msg,sz,ssrc,ts,seq|str,ssrc,ts,seq
   next++;
   uint32_t ts = luaL_checkinteger(L,next);
   rtp_msg_t * message = malloc(sizeof(*message));
-  message->header.ssrc    = ssrc;
-  message->header.ts      = ts;
-  message->header.seq     = seq;
+  message->header.ssrc    = htonl(ssrc);
+  message->header.ts      = htonl(ts);
+  message->header.seq     = htons(seq);
   message->header.m       = 0;
   message->header.pt      = 0x100;
   message->header.version = 2;

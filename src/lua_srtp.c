@@ -268,37 +268,36 @@ lupdate_ssrc(lua_State *L){
 }
 static int
 lrtp_info(lua_State *L){
-  rtp_msg_t * message = lua_touserdata(L,1);
-  srtcp_hdr_t * rtcp = (srtcp_hdr_t *)message;
+  rtpheader * rtp = lua_touserdata(L,1);
+  rtcpheader * rtcp = (srtcp_hdr_t *)rtp;
   lua_newtable(L);
-  if(rtcp->pt == RTCP_Sender_PT ||
-     rtcp->pt == RTCP_Receiver_PT ||
-     rtcp->pt == RTCP_PS_Feedback_PT ||
-     rtcp->pt == RTCP_RTP_Feedback_PT){
-    lua_pushstring(L,"rcp");
+  if(rtcp->packettype == RTCP_Sender_PT ||
+     rtcp->packettype == RTCP_Receiver_PT ||
+     rtcp->packettype == RTCP_PS_Feedback_PT ||
+     rtcp->packettype == RTCP_RTP_Feedback_PT){
+    lua_pushstring(L,"rtcp");
     lua_pushboolean(L,1);
     lua_settable(L,-3);
     lua_pushstring(L,"ssrc");
     lua_pushinteger(L,ntohl(rtcp->ssrc));
     lua_settable(L,-3);
     lua_pushstring(L,"pt");
-    lua_pushinteger(L,rtcp->pt);
+    lua_pushinteger(L,rtcp->packettype);
     lua_settable(L,-3);
+    if (rtcp->packettype != RTCP_Sender_PT){
+      lua_pushstring(L,"source_ssrc");
+      lua_pushinteger(L,ntohl(rtcp->report.receiverReport.ssrcsource));
+      lua_settable(L,-3);
+    }
   }else{
     lua_pushstring(L,"rtp");
     lua_pushboolean(L,1);
     lua_settable(L,-3);
     lua_pushstring(L,"ssrc");
-    lua_pushinteger(L,ntohl(message->header.ssrc));
+    lua_pushinteger(L,ntohl(rtp->ssrc));
     lua_settable(L,-3);
     lua_pushstring(L,"pt");
-    lua_pushinteger(L,message->header.pt);
-    lua_settable(L,-3);
-    lua_pushstring(L,"ts");
-    lua_pushinteger(L,ntohl(message->header.ts));
-    lua_settable(L,-3);
-    lua_pushstring(L,"seq");
-    lua_pushinteger(L,ntohs(message->header.ts));
+    lua_pushinteger(L,rtp->payloadtype);
     lua_settable(L,-3);
   }
   return 1;

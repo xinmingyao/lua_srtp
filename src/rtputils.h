@@ -197,8 +197,36 @@
     uint32_t packettype :8;
     uint32_t length :16;
     uint32_t ssrc;
-    uint32_t ssrcsource;
-    uint32_t fractionlost:8
+    union report_t {
+      struct receiverReport_t {
+	uint32_t ssrcsource;
+	/* RECEIVER REPORT DATA*/
+	uint32_t fractionlost:8;
+	int32_t lost:24;
+	uint32_t highestseqnum;
+	uint32_t jitter;
+	uint32_t lastsr;
+	uint32_t delaysincelast;
+      } receiverReport;
+
+      struct senderReport_t {
+	uint64_t ntptimestamp;
+	uint32_t rtprts;
+	uint32_t packetsent;
+	uint32_t octetssent;
+	struct receiverReport_t rrlist[1];
+      } senderReport;
+        
+      struct remb_t{
+	uint32_t ssrcsource;
+	uint32_t uniqueid;
+	uint32_t numssrc:8;
+	uint32_t brexp:6;
+	uint32_t brmantis:18; //0x3FFFF
+	uint32_t ssrcfeedb;
+      } rembPacket;
+    
+    } report;
   } rtcpheader;
 
 

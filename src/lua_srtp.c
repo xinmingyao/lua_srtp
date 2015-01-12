@@ -201,6 +201,58 @@ lunprotect_data(lua_State *L){
 }
 
 static int
+lis_nack(lua_State *L){
+  srtcp_hdr_t * rtcp  = lua_touserdata(L,1);
+  int len = luaL_checkinteger(L,2);
+  int fir = 0;
+  char* movingBuf = lua_touserdata(L,1);
+  int rtcpLength = 0;
+  int totalLength = 0;
+  do{
+    movingBuf+=rtcpLength;
+    srtcp_hdr_t  *chead= (srtcp_hdr_t *)movingBuf;
+    rtcpLength= (ntohs(chead->len)+1)*4; //seq is lenght for rtcp      
+    totalLength+= rtcpLength;
+    if (chead->pt == RTCP_RTP_Feedback_PT){
+      firheader *thefir = (firheader *)movingBuf;
+      if (thefir->fmt == 1){ 
+	fir++;
+	break;
+      }
+    }
+  } while(totalLength<len);
+  lua_pushboolean(L,fir);
+  return 1;
+}
+static int
+lis_fir(lua_State *L){
+  srtcp_hdr_t * rtcp  = lua_touserdata(L,1);
+  int len = luaL_checkinteger(L,2);
+  int fir = 0;
+  char* movingBuf = lua_touserdata(L,1);
+  int rtcpLength = 0;
+  int totalLength = 0;
+  do{
+    movingBuf+=rtcpLength;
+    srtcp_hdr_t  *chead= (srtcp_hdr_t *)movingBuf;
+    rtcpLength= (ntohs(chead->len)+1)*4; //seq is lenght for rtcp      
+    totalLength+= rtcpLength;
+    if (chead->pt == RTCP_PS_Feedback_PT){
+      firheader *thefir = (firheader *)movingBuf;
+      if (thefir->fmt == 4 || thefir->fmt == 1){ // FIR OR PLI
+	//ELOG_DEBUG("Feedback FIR packet, changed source %u sourcessrc to %u fmt %d", ssrc, sourcessrc, thefir->fmt);
+	//this->sendFirPacket();
+	fir++;
+	break;
+      }
+    }
+  } while(totalLength<len);
+  lua_pushboolean(L,fir);
+  return 1;
+}
+
+
+static int
 lupdate_ssrc(lua_State *L){
   rtp_msg_t * message = lua_touserdata(L,1);
   char * buf = lua_touserdata(L,1);
@@ -413,6 +465,8 @@ luaopen_lua_srtp(lua_State *L) {
     { "first_packet",lfirst_packet},
     { "is_rtcp",lis_rtcp},
     { "is_rtcp_feedback",lis_rtcp_feedback},
+    { "is_fir",lis_fir},
+    { "is_nack",lis_nack},
     { NULL, NULL },
   };
   luaL_newlib(L,l);

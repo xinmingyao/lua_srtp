@@ -3,7 +3,7 @@
 #include "srtp.h"
 #include "rtp.h"
 #include "rtp_priv.h"
-
+#include "rtcp.h"
 #if defined(_WIN32)
 #include <windows.h>
 #define SRTP_API __declspec(dllexport)

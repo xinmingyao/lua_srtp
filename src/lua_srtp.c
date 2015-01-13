@@ -442,6 +442,66 @@ static int lfirst_packet(lua_State *L){
   return 2;
 }
 
+
+/* Generate a new PLI message */
+static int 
+lrtcp_pli(lua_State * L) {
+  int len = 12;
+  char *packet =(uint8_t *)malloc(len);
+  memset(packet,0,len);
+  rtcp_header *rtcp = (rtcp_header *)packet;
+  /* Set header */
+  rtcp->version = 2;
+  rtcp->type = RTCP_PSFB;
+  rtcp->rc = 1;	/* FMT=1 */
+  rtcp->length = htons((len/4)-1);
+  lua_pushlightuserdata(L,packet);
+  return 1;
+}
+
+
+/* Generate a new REMB message */
+static int
+lrtcp_remb(lua_State *L) {
+  int len = 24;
+  uint64_t bitrate = luaL_checkinteger(L,1);
+  char *packet =(uint8_t *)malloc(len);
+  memset(packet,0,len);
+  rtcp_header *rtcp = (rtcp_header *)packet;
+  /* Set header */
+  rtcp->version = 2;
+  rtcp->type = RTCP_PSFB;
+  rtcp->rc = 15;
+  rtcp->length = htons((len/4)-1);
+  /* Now set REMB stuff */
+  rtcp_fb *rtcpfb = (rtcp_fb *)rtcp;
+  rtcp_remb *remb = (rtcp_remb *)rtcpfb->fci;
+  remb->id[0] = 'R';
+  remb->id[1] = 'E';
+  remb->id[2] = 'M';
+  remb->id[3] = 'B';
+	/* bitrate --> brexp/brmantissa */
+  uint8_t b = 0;
+  uint8_t newbrexp = 0;
+  uint32_t newbrmantissa = 0;
+  for(b=0; b<64; b++) {
+    if(bitrate <= (0x3FFFF << b)) {
+      newbrexp = b;
+      break;
+    }
+  }
+  newbrmantissa = bitrate >> b;
+  /* FIXME From rtcp_sender.cc */
+  unsigned char *_ptrRTCPData = (unsigned char *)remb;
+  _ptrRTCPData += 4;	/* Skip unique identifier */
+  _ptrRTCPData[0] = (uint8_t)(1);	/* Just one SSRC */
+  _ptrRTCPData[1] = (uint8_t)((newbrexp << 2) + ((newbrmantissa >> 16) & 0x03));
+  _ptrRTCPData[2] = (uint8_t)(newbrmantissa >> 8);
+  _ptrRTCPData[3] = (uint8_t)(newbrmantissa);
+  lua_pushlightuserdata(L,packet);
+  return 1;
+}
+
 SRTP_API
 int
 luaopen_lua_srtp(lua_State *L) {
@@ -467,6 +527,8 @@ luaopen_lua_srtp(lua_State *L) {
     { "is_rtcp_feedback",lis_rtcp_feedback},
     { "is_fir",lis_fir},
     { "is_nack",lis_nack},
+    { "rtcp_pli",lrtcp_pli},
+    { "rtcp_remb",lrtcp_remb},
     { NULL, NULL },
   };
   luaL_newlib(L,l);

@@ -456,7 +456,8 @@ lrtcp_pli(lua_State * L) {
   rtcp->rc = 1;	/* FMT=1 */
   rtcp->length = htons((len/4)-1);
   lua_pushlightuserdata(L,packet);
-  return 1;
+  lua_pushinteger(L,len);
+  return 2;
 }
 
 
@@ -499,7 +500,8 @@ lrtcp_remb(lua_State *L) {
   _ptrRTCPData[2] = (uint8_t)(newbrmantissa >> 8);
   _ptrRTCPData[3] = (uint8_t)(newbrmantissa);
   lua_pushlightuserdata(L,packet);
-  return 1;
+  lua_pushinteger(L,len);
+  return 2;
 }
 
 SRTP_API

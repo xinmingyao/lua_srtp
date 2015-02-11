@@ -4,6 +4,7 @@
 #include "assert.h"
 #include "crypto_math.h"
 #include <string.h>
+#include "skynet_malloc.h"
 #define false 0
 #define true 1
 //#define RTCP_Sender_PT 200 //rtcp sender report
@@ -22,20 +23,21 @@ lsrtp_init(lua_State *L){
 }
 static int
 lnew(lua_State *L) {
-  struct lua_srtp * lsrtp = lua_newuserdata(L, sizeof(*lsrtp));
+  struct lua_srtp * lsrtp = skynet_malloc(sizeof(*lsrtp));
   if(!lsrtp){
     return luaL_error(L, "cannot new lua_srtp");
   }
   lsrtp->active = false;
   lsrtp->send_session = NULL;
   lsrtp->receive_session = NULL;
+  lua_pushlightuserdata(L,lsrtp);
   return 1;	
 }
 
 static int
 ldestroy(lua_State *L){
   struct lua_srtp  * srtp = lua_touserdata(L,1);
-  free(srtp);
+  skynet_free(srtp);
   return 0;
 }
 
@@ -303,7 +305,7 @@ lupdate_ssrc(lua_State *L){
 	}
 	// Parse RED packet to VP8 packet.
 	// Copy RTP header
-	char * deliverMediaBuffer_ = malloc(3000);
+	char * deliverMediaBuffer_ = skynet_malloc(3000);
 	memcpy(deliverMediaBuffer_, buf, rtpHeaderLength);
 	// Copy payload data
 	memcpy(deliverMediaBuffer_ + totalLength, buf + totalLength + 1, len - totalLength - 1);
@@ -351,13 +353,16 @@ lrtp_info(lua_State *L){
     lua_pushstring(L,"pt");
     lua_pushinteger(L,rtp->payloadtype);
     lua_settable(L,-3);
+    lua_pushstring(L,"seq");
+    lua_pushinteger(L,ntohs(rtp->seqnum));
+    lua_settable(L,-3);
   }
   return 1;
 }
 static int lunpack_rtp(lua_State *L){
   rtp_msg_t * message = lua_touserdata(L,1);
   int len = luaL_checkinteger(L,2) - sizeof(srtp_hdr_t);
-  char * msg = malloc(len);
+  char * msg = skynet_malloc(len);
   memcpy(msg,message->body,len);
   lua_pushlightuserdata(L,msg);
   lua_pushinteger(L,len);
@@ -384,7 +389,7 @@ static int lpack_rtp(lua_State *L){//msg,sz,ssrc,ts,seq|str,ssrc,ts,seq
   uint16_t seq = luaL_checkinteger(L,next);
   next++;
   uint32_t ts = luaL_checkinteger(L,next);
-  rtp_msg_t * message = malloc(sizeof(*message));
+  rtp_msg_t * message = skynet_malloc(sizeof(*message));
   message->header.ssrc    = htonl(ssrc);
   message->header.ts      = htonl(ts);
   message->header.seq     = htons(seq);
@@ -409,7 +414,7 @@ static int lfirst_packet(lua_State *L){
   int source_ssrc = luaL_checkinteger(L,2);
   int fir = luaL_checkinteger(L,3);
   int pos = 0;
-  uint8_t * rtcpPacket = (uint8_t *)malloc(50);
+  uint8_t * rtcpPacket = (uint8_t *)skynet_malloc(100);
   // add full intra request indicator
   uint8_t FMT = 4;
   rtcpPacket[pos++] = (uint8_t) 0x80 + FMT;
@@ -447,7 +452,7 @@ static int lfirst_packet(lua_State *L){
 static int 
 lrtcp_pli(lua_State * L) {
   int len = 12;
-  char *packet =(uint8_t *)malloc(len);
+  char *packet =(uint8_t *)skynet_malloc(len+50);
   memset(packet,0,len);
   rtcp_header *rtcp = (rtcp_header *)packet;
   /* Set header */
@@ -460,13 +465,178 @@ lrtcp_pli(lua_State * L) {
   return 2;
 }
 
+int lrtcp_remove_nacks(lua_State *L) {
+  char * packet = lua_touserdata(L,1);
+  int len = luaL_checkinteger(L,2);
+  if(packet == NULL || len == 0)
+    return len;
+  rtcp_header *rtcp = (rtcp_header *)packet;
+  if(rtcp->version != 2)
+    return len;
+  /* Find the NACK message */
+  char *nacks = NULL;
+  int total = len, nacks_len = 0;
+  while(rtcp) {
+    if(rtcp->type == RTCP_RTPFB) {
+      int fmt = rtcp->rc;
+      if(fmt == 1) {
+	nacks = (char *)rtcp;
+      }
+    }
+    /* Is this a compound packet? */
+    int length = ntohs(rtcp->length);
+    if(length == 0)
+      break;
+    if(nacks != NULL) {
+      nacks_len = length*4+4;
+      break;
+    }
+    total -= length*4+4;
+    if(total <= 0)
+      break;
+    rtcp = (rtcp_header *)((uint32_t*)rtcp + length + 1);
+  }
+  if(nacks != NULL) {
+    total = len - ((nacks-packet)+nacks_len);
+    if(total < 0) {
+      /* FIXME Should never happen, but you never know: do nothing */
+      //return len;
+    } else if(total == 0) {
+      /* NACK was the last compound packet, easy enough */
+      len =  len-nacks_len;
+    } else {
+      /* NACK is between two compound packets, move them around */
+      int i=0;
+      for(i=0; i<total; i++)
+	*(nacks+i) = *(nacks+nacks_len+i);
+      len = len-nacks_len;
+    }
+  }
+  lua_pushinteger(L,len);
+  return 1;
+}
+
+static int 
+lrtcp_get_remb(lua_State * L) {
+  char * packet = lua_touserdata(L,1);
+  int len = luaL_checkinteger(L,2);
+  if(packet == NULL || len == 0)
+    return 0;
+  rtcp_header *rtcp = (rtcp_header *)packet;
+  if(rtcp->version != 2)
+    return 0;
+  /* Get REMB bitrate, if any */
+  int total = len;
+  while(rtcp) {
+    if(rtcp->type == RTCP_PSFB) {
+      int fmt = rtcp->rc;
+      if(fmt == 15) {
+	rtcp_fb *rtcpfb = (rtcp_fb *)rtcp;
+	rtcp_remb *remb = (rtcp_remb *)rtcpfb->fci;
+	if(remb->id[0] == 'R' && remb->id[1] == 'E' && remb->id[2] == 'M' && remb->id[3] == 'B') {
+	  /* FIXME From rtcp_utility.cc */
+	  unsigned char *_ptrRTCPData = (unsigned char *)remb;
+	  _ptrRTCPData += 4;      /* Skip unique identifier and num ssrc */
+	  //~ JANUS_LOG(LOG_VERB, " %02X %02X %02X %02X\n", _ptrRTCPData[0], _ptrRTCPData[1], _ptrRTCPData[2], _ptrRTCPData[3]);
+	  uint8_t brExp = (_ptrRTCPData[1] >> 2) & 0x3F;
+	  uint32_t brMantissa = (_ptrRTCPData[1] & 0x03) << 16;
+	  brMantissa += (_ptrRTCPData[2] << 8);
+	  brMantissa += (_ptrRTCPData[3]);
+	  uint64_t bitrate = brMantissa << brExp;
+	  lua_pushinteger(L,bitrate);
+	  return 1;
+	}
+      }
+    }
+    /* Is this a compound packet? */
+    int length = ntohs(rtcp->length);
+    if(length == 0)
+      break;
+    total -= length*4+4;
+    if(total <= 0)
+      break;
+    rtcp = (rtcp_header *)((uint32_t*)rtcp + length + 1);
+  }
+  return 0;
+}
+
+static int
+lrtcp_get_nacks(lua_State *L) {
+  char * packet = lua_touserdata(L,1);
+  int len = luaL_checkinteger(L,2);
+  int fir = 0;
+	if(packet == NULL || len == 0)
+		return 0;
+	rtcp_header *rtcp = (rtcp_header *)packet;
+	if(rtcp->version != 2)
+		return 0;
+	/* FIXME Get list of sequence numbers we should send again */
+	lua_newtable(L);
+	int total = len;
+	int index = 1;
+	while(rtcp) {
+		if(rtcp->type == RTCP_RTPFB) {
+		       int fmt = rtcp->rc;
+			if(fmt == 1) {
+				rtcp_fb *rtcpfb = (rtcp_fb *)rtcp;
+				int nacks = ntohs(rtcp->length)-2;	/* Skip SSRCs */
+				if(nacks > 0) {			
+					rtcp_nack *nack = NULL;
+					uint16_t pid = 0;
+					uint16_t blp = 0;
+					int i=0, j=0;
+					char bitmask[20];
+					for(i=0; i< nacks; i++) {
+						nack = (rtcp_nack *)rtcpfb->fci + i;
+						pid = ntohs(nack->pid);
+						//list = g_slist_append(list, GUINT_TO_POINTER(pid));
+						lua_pushinteger(L,pid);
+						lua_rawseti(L,-2,index);
+						index++;
+						blp = ntohs(nack->blp);
+						memset(bitmask, 0, 20);
+						for(j=0; j<16; j++) {
+							bitmask[j] = (blp & ( 1 << j )) >> j ? '1' : '0';
+							if((blp & ( 1 << j )) >> j){
+							  lua_pushinteger(L,pid);
+							  lua_rawseti(L,-2,index);
+							  index++;}
+							//list = g_slist_append(list, GUINT_TO_POINTER(pid+j+1));
+						}
+						bitmask[16] = '\n';
+					
+					}
+				}
+			}
+		}else if(rtcp->type == RTCP_PSFB){
+		  if(rtcp->rc == 1  ||
+		     rtcp->rc == 2  ||
+		     rtcp->rc == 3  ||
+		     rtcp->rc == 4  ||
+		     rtcp->rc ==5){
+		    fir = 1;
+		  }
+		}
+		/* Is this a compound packet? */
+		int length = ntohs(rtcp->length);
+		if(length == 0)
+			break;
+		total -= length*4+4;
+		if(total <= 0)
+			break;
+		rtcp = (rtcp_header *)((uint32_t*)rtcp + length + 1);
+	}
+	lua_pushboolean(L,fir);
+	return 2;
+}
 
 /* Generate a new REMB message */
 static int
 lrtcp_remb(lua_State *L) {
   int len = 24;
   uint64_t bitrate = luaL_checkinteger(L,1);
-  char *packet =(uint8_t *)malloc(len);
+  int ssrc = luaL_checkinteger(L,2);
+  char *packet =(uint8_t *)skynet_malloc(len+50);
   memset(packet,0,len);
   rtcp_header *rtcp = (rtcp_header *)packet;
   /* Set header */
@@ -476,6 +646,7 @@ lrtcp_remb(lua_State *L) {
   rtcp->length = htons((len/4)-1);
   /* Now set REMB stuff */
   rtcp_fb *rtcpfb = (rtcp_fb *)rtcp;
+  rtcpfb->ssrc = htonl(ssrc);
   rtcp_remb *remb = (rtcp_remb *)rtcpfb->fci;
   remb->id[0] = 'R';
   remb->id[1] = 'E';
@@ -531,6 +702,9 @@ luaopen_lua_srtp(lua_State *L) {
     { "is_nack",lis_nack},
     { "rtcp_pli",lrtcp_pli},
     { "rtcp_remb",lrtcp_remb},
+    { "rtcp_get_nacks",lrtcp_get_nacks},
+    { "rtcp_remove_nacks",lrtcp_remove_nacks},
+    { "rtcp_get_remb",lrtcp_get_remb},
     { NULL, NULL },
   };
   luaL_newlib(L,l);
